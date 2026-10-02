@@ -1,0 +1,22 @@
+[project]
+name = "auto-translate"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "alansekha", email = "alansekha1905@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "faster-whisper>=1.2.1",
+    "nvidia-cublas-cu12>=12.9.2.10",
+    "nvidia-cudnn-cu12>=9.27.0.42",
+    "sentencepiece>=0.2.2",
+]
+
+[project.scripts]
+auto-translate = "auto_translate.__main__:main"
+
+[build-system]
+requires = ["uv_build>=0.12.22,<0.13.0"]
+build-backend = "uv_build"

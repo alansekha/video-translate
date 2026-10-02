@@ -1,0 +1,23 @@
+# Fixed JA → EN translations, applied before the translator runs.
+# NMT presets: the Japanese term is replaced by the English one in the input text.
+# LLM presets: matching entries are listed in the prompt.
+# Longer terms win over shorter ones; keep single-kanji terms rare (they can match inside words).
+
+[terms]
+"草" = "lol"
+"てぇてぇ" = "so precious"
+"てえてえ" = "so precious"
+"尊い" = "precious"
+"おつ" = "good work"
+"おつかれ" = "good work"
+"お疲れ様" = "good work"
+"スパチャ" = "superchat"
+"メン限" = "members-only"
+"配信" = "stream"
+"切り抜き" = "clip"
+"リスナー" = "viewers"
+"ガチ恋" = "real love"
+"初見" = "first-timer"
+"ヴァロラント" = "Valorant"
+"ヴァロ" = "Valorant"
+"バロ" = "Valorant"

@@ -1,0 +1,86 @@
+stats_interval_s = 30
+
+[ingest]
+ytdlp_format = "bestaudio/93/best"
+cookies_from_browser = ""   # "chrome", "firefox", ... for members-only streams
+
+[vad]
+threshold = 0.5
+neg_threshold = 0.35
+min_silence_ms = 500
+speech_pad_ms = 200
+min_speech_ms = 250
+max_utterance_s = 6.0   # keep below [mpv] delay_s minus ~3 s so mpv subtitles are never late
+
+[asr]
+backend = "faster-whisper"
+model = "kotoba-tech/kotoba-whisper-v2.0-faster"
+device = "cuda"
+compute_type = "int8_float16"   # ~1.3 GB VRAM vs ~2.2 GB for float16, same speed/accuracy; leaves room for the LLM
+beam_size = 5
+no_speech_threshold = 0.6
+log_prob_threshold = -1.0
+blocklist = [
+  "ご視聴ありがとうございました",
+  "ご視聴ありがとうございます",
+  "チャンネル登録",
+  "高評価",
+  "字幕",
+]
+
+[translate]
+preset = "balanced"     # balanced | light-sugoi | light | quality | none (override with --preset)
+context_lines = 4       # previous JA/EN lines sent to the LLM as context
+glossary = "glossary.toml"
+
+# NMT on CPU: tiny and fast, stiff translations. License: CC-BY 4.0.
+[translate.presets.light]
+backend = "ct2"
+model = "gaudi/opus-mt-ja-en-ctranslate2"
+source_spm = "source.spm"
+target_spm = "target.spm"
+device = "cpu"
+compute_type = "int8"
+
+# NMT trained on casual Japanese (games / visual novels). NTT license: research use only.
+[translate.presets.light-sugoi]
+backend = "ct2"
+model = "entai2965/sugoi-v4-ja-en-ctranslate2"
+source_spm = "spm/spm.ja.nopretok.model"
+target_spm = "spm/spm.en.nopretok.model"
+device = "cuda"
+compute_type = "int8_float16"   # ~300 MB VRAM
+
+# LLM via Ollama (ollama pull qwen3:4b-instruct-2507-q4_K_M). Uses context + glossary.
+[translate.presets.balanced]
+backend = "openai-compat"
+base_url = "http://127.0.0.1:11434/v1"
+model = "qwen3:4b-instruct-2507-q4_K_M"
+
+# Bigger LLM; partly offloaded to CPU on a 6 GB GPU, so slower (ollama pull qwen3.5:9b).
+[translate.presets.quality]
+backend = "openai-compat"
+base_url = "http://127.0.0.1:11434/v1"
+model = "qwen3.5:9b"
+extra_body = { reasoning_effort = "none" }   # don't "think" before answering
+# Measured: mt avg 2.0 s / max 5.1 s, end of speech → subtitle max ~8 s. 9 s (the default) is too short.
+mpv_delay_s = 15.0
+
+[output]
+terminal = true
+web = true
+web_host = "0.0.0.0"   # 0.0.0.0 = reachable from phone / Mac on the LAN; 127.0.0.1 = this PC only
+web_port = 8765
+
+[mpv]
+enabled = false     # or pass --mpv
+path = ""           # "" = find mpv on PATH, then C:\Program Files\MPV Player\mpv.exe
+delay_s = 9.0       # pipeline head start over playback; must exceed max_utterance_s + ~3 s
+start_wait_s = 3.0  # VOD: wait before playing after start / a jump (live waits delay_s)
+port = 9137
+hwdec = "auto-safe" # decode video on the GPU's video unit; "no" = CPU (stutters while an LLM uses the CPU)
+ytdlp_format = "bv*[height<=480][vcodec^=avc1][protocol^=m3u8]+ba[protocol^=m3u8]/b[height<=480][protocol^=m3u8]/b[protocol^=m3u8]"
+en_size = 44
+ja_size = 28
+min_display_s = 1.5
+hold_s = 1.0

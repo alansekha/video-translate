@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0b0d">
+<title>Live Subtitles</title>
+<style>
+  :root {
+    --bg: #0b0b0d;
+    --fg: #f4f4f5;
+    --muted: #9a9aa3;
+    --faint: #5c5c66;
+    --accent: #7dd3fc;
+    --ok: #4ade80;
+    --bad: #f87171;
+    --panel: #18181c;
+    --scale: 1;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    display: flex;
+    flex-direction: column;
+    padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+    overflow: hidden;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0; font-size: 13px; color: var(--muted);
+  }
+  #dot { width: 9px; height: 9px; border-radius: 50%; background: var(--bad); flex: none; }
+  #dot.ok { background: var(--ok); }
+  #status { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header button {
+    background: var(--panel); color: var(--fg); border: 1px solid #2a2a31;
+    border-radius: 8px; min-width: 40px; height: 34px; font-size: 15px; cursor: pointer;
+  }
+  header button[aria-pressed="false"] { color: var(--faint); }
+
+  /* Lines stack from the bottom, like subtitles. */
+  #lines {
+    flex: 1; display: flex; flex-direction: column; justify-content: flex-end;
+    gap: calc(22px * var(--scale)); padding-bottom: 20px; overflow: hidden;
+  }
+  .line { transition: opacity .4s; animation: in .25s ease-out; }
+  @keyframes in { from { opacity: 0; transform: translateY(8px); } }
+  .line.old { opacity: .45; }
+  .line.older { opacity: .25; }
+  .meta { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .ja {
+    font-size: calc(clamp(15px, 2.6vw, 24px) * var(--scale));
+    color: var(--muted); line-height: 1.45; margin-top: 2px;
+  }
+  .en {
+    font-size: calc(clamp(24px, 5.2vw, 52px) * var(--scale));
+    font-weight: 600; line-height: 1.25; margin-top: 4px; text-wrap: balance;
+  }
+  body.hide-ja .ja { display: none; }
+  #empty { color: var(--faint); font-size: 18px; text-align: center; margin: auto 0; }
+</style>
+</head>
+<body>
+  <header>
+    <span id="dot" title="connection"></span>
+    <span id="status">connecting…</span>
+    <button id="ja" aria-pressed="true" title="show Japanese">JA</button>
+    <button id="smaller" title="smaller text">A−</button>
+    <button id="bigger" title="bigger text">A+</button>
+  </header>
+  <main id="lines"><div id="empty">Waiting for subtitles…</div></main>
+
+<script>
+  const MAX_LINES = Number(new URLSearchParams(location.search).get("lines")) || 3;
+  const linesEl = document.getElementById("lines");
+  const dot = document.getElementById("dot");
+  const statusEl = document.getElementById("status");
+
+  // Per-device preferences (text size, JA on/off). Storage can be unavailable, so never rely on it.
+  const prefs = { scale: 1, ja: true };
+  try { Object.assign(prefs, JSON.parse(localStorage.getItem("subs-prefs") || "{}")); } catch {}
+  function applyPrefs() {
+    document.documentElement.style.setProperty("--scale", prefs.scale);
+    document.body.classList.toggle("hide-ja", !prefs.ja);
+    document.getElementById("ja").setAttribute("aria-pressed", String(prefs.ja));
+    try { localStorage.setItem("subs-prefs", JSON.stringify(prefs)); } catch {}
+  }
+  document.getElementById("ja").onclick = () => { prefs.ja = !prefs.ja; applyPrefs(); };
+  document.getElementById("smaller").onclick = () => { prefs.scale = Math.max(0.6, +(prefs.scale - 0.1).toFixed(1)); applyPrefs(); };
+  document.getElementById("bigger").onclick = () => { prefs.scale = Math.min(2.0, +(prefs.scale + 0.1).toFixed(1)); applyPrefs(); };
+  applyPrefs();
+
+  function fmt(s) {
+    const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60, sec = Math.floor(s % 60);
+    const mm = String(m).padStart(2, "0"), ss = String(sec).padStart(2, "0");
+    return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+  }
+
+  function add(sub) {
+    document.getElementById("empty")?.remove();
+    const el = document.createElement("div");
+    el.className = "line";
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = fmt(sub.start_s);
+    const ja = document.createElement("div");
+    ja.className = "ja";
+    ja.lang = "ja";
+    ja.textContent = sub.ja;
+    el.append(meta, ja);
+    if (sub.en) {
+      const en = document.createElement("div");
+      en.className = "en";
+      en.textContent = sub.en;
+      el.append(en);
+    }
+    linesEl.append(el);
+    while (linesEl.children.length > MAX_LINES) linesEl.firstElementChild.remove();
+    const all = [...linesEl.children];
+    all.forEach((node, i) => {
+      const age = all.length - 1 - i;  // 0 = newest
+      node.classList.toggle("old", age === 1);
+      node.classList.toggle("older", age >= 2);
+    });
+  }
+
+  // EventSource reconnects by itself and sends Last-Event-ID, so missed lines are replayed.
+  const es = new EventSource("/events");
+  es.onopen = () => { dot.classList.add("ok"); statusEl.textContent = "live"; };
+  es.onerror = () => { dot.classList.remove("ok"); statusEl.textContent = "reconnecting…"; };
+  es.onmessage = (e) => add(JSON.parse(e.data));
+</script>
+</body>
+</html>
