@@ -2,6 +2,10 @@
 
 Reuses the Silero ONNX model bundled with faster-whisper (no PyTorch needed), but keeps
 the model's recurrent state across calls so it works on a live stream.
+
+Silero misses voices mixed with loud music (narrated videos, singing). So audio it calls
+non-speech isn't thrown away: every `fallback_s` it goes to Whisper as a "probe" utterance,
+and Whisper (with stricter filters, see asr) decides whether anyone is talking.
 """
 
 import logging
@@ -55,6 +59,9 @@ class Segmenter:
         self.min_speech = _ms_to_frames(cfg.min_speech_ms)
         self.max_frames = _ms_to_frames(cfg.max_utterance_s * 1000)
         self.split_search = _ms_to_frames(2000)  # look this far back for a quiet split point
+        self.fallback_frames = _ms_to_frames(cfg.fallback_s * 1000) if cfg.fallback_s > 0 else 0
+        self.fallback_min = _ms_to_frames(cfg.fallback_min_s * 1000)
+        self.fallback_min_rms = 10 ** (cfg.fallback_min_db / 20)
         self._reset(0)
 
     def _reset(self, next_sample: int) -> None:
@@ -63,6 +70,8 @@ class Segmenter:
         self._leftover = np.zeros(0, dtype=np.float32)  # samples not yet a whole frame
         self._next_frame_sample = next_sample  # sample index of the next frame to process
         self._preroll: deque[np.ndarray] = deque(maxlen=self.pad)  # recent non-speech frames
+        self._idle: list[np.ndarray] = []  # non-speech frames since the last utterance (fallback)
+        self._idle_start = next_sample
         self._frames: list[np.ndarray] = []  # current utterance
         self._probs: list[float] = []
         self._start_sample = 0
@@ -93,6 +102,7 @@ class Segmenter:
         """End of stream: emit whatever speech is in progress."""
         if self._in_speech:
             self._emit(len(self._frames), keep_rest=False)
+        self._emit_probe(len(self._idle))
         out, self._out = self._out, []
         return out
 
@@ -100,6 +110,8 @@ class Segmenter:
         cfg = self.cfg
         if not self._in_speech:
             if prob >= cfg.threshold:
+                # Idle audio before the preroll goes to Whisper; the preroll joins the utterance.
+                self._emit_probe(len(self._idle) - len(self._preroll))
                 self._in_speech = True
                 self._frames = [*self._preroll, frame]
                 self._probs = [0.0] * len(self._preroll) + [prob]
@@ -107,6 +119,7 @@ class Segmenter:
                 self._silence = 0
             else:
                 self._preroll.append(frame)
+                self._add_idle(frame)
             return
 
         self._frames.append(frame)
@@ -147,6 +160,35 @@ class Segmenter:
             self._frames, self._probs = [], []
             self._preroll.clear()
             self._preroll.extend(rest_frames)  # deque(maxlen) keeps only the last `pad`
+            self._idle, self._idle_start = list(rest_frames), end
+
+    def _add_idle(self, frame: np.ndarray) -> None:
+        if not self.fallback_frames:
+            return
+        if not self._idle:
+            self._idle_start = self._next_frame_sample
+        self._idle.append(frame)
+        if len(self._idle) >= self.fallback_frames:
+            # Cut at the quietest frame in the last ~2 s, so a word is less likely to be split.
+            lo = max(self.fallback_min, len(self._idle) - self.split_search)
+            rms = [float(np.sqrt(np.mean(f * f))) for f in self._idle[lo:]]
+            self._emit_probe(lo + int(np.argmin(rms)) + 1)
+
+    def _emit_probe(self, n: int) -> None:
+        """Send the first `n` idle frames to Whisper as a probe (if long and loud enough)."""
+        frames, self._idle = self._idle[:max(n, 0)], self._idle[max(n, 0):]
+        start = self._idle_start
+        self._idle_start += len(frames) * FRAME
+        if not self.fallback_frames or len(frames) < self.fallback_min:
+            return
+        audio = np.concatenate(frames)
+        if np.sqrt(np.mean(audio * audio)) < self.fallback_min_rms:
+            return  # (near) silence
+        end = start + len(audio)
+        utt = Utterance(start / SAMPLE_RATE, end / SAMPLE_RATE, audio, probe=True)
+        utt.timings.audio_read = self._read_at - (self._next_frame_sample + FRAME - end) / SAMPLE_RATE
+        utt.timings.segmented = time.monotonic()
+        self._out.append(utt)
 
 
 def run_segmenter(cfg: VadConfig, in_q: "queue.Queue[AudioChunk | None]",

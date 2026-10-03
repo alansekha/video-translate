@@ -11,6 +11,7 @@ min_silence_ms = 500
 speech_pad_ms = 200
 min_speech_ms = 250
 max_utterance_s = 6.0   # keep below [mpv] delay_s minus ~3 s so mpv subtitles are never late
+fallback_s = 5.0        # non-speech audio (voice under loud music) still goes to Whisper in pieces this long; 0 = off
 
 [asr]
 backend = "faster-whisper"

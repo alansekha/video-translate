@@ -28,7 +28,7 @@ def run_asr(asr: ASR, in_q: "queue.Queue[Utterance | None]",
     """Thread body."""
     while (utt := in_q.get()) is not None:
         utt.timings.asr_start = time.monotonic()
-        text = asr.transcribe(utt.audio)
+        text = asr.transcribe(utt.audio, utt.probe)
         utt.timings.asr_end = time.monotonic()
         if text:
             out_q.put(Transcript(utt.start_s, utt.end_s, text, utt.timings))

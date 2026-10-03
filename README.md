@@ -340,6 +340,9 @@ All keys are optional; missing ones use the defaults below. An unknown key is an
 | `speech_pad_ms` | `200` | Audio kept before/after the speech. |
 | `min_speech_ms` | `250` | Drop lines with less speech than this (coughs, clicks). |
 | `max_utterance_s` | `6.0` (code default 9) | Force-split long speech after this many seconds, at the quietest point in the last 2 s. Keep below `[mpv] delay_s` − 3. |
+| `fallback_s` | `5.0` | The VAD misses voices mixed with loud music (narrated videos, trailers, singing). Audio it calls non-speech is still sent to Whisper in pieces of up to this many seconds, and Whisper decides (with the stricter `probe_*` filters in `[asr]`). `0` = off (VAD only). Keep below `[mpv] delay_s` − 3. |
+| `fallback_min_s` | `1.5` | Skip non-speech pieces shorter than this (short bits of music often come back as a random word). |
+| `fallback_min_db` | `-45.0` | Skip non-speech pieces quieter than this (RMS, dBFS), so silence never reaches Whisper. |
 
 ### `[asr]`: speech recognition
 
@@ -352,6 +355,8 @@ All keys are optional; missing ones use the defaults below. An unknown key is an
 | `beam_size` | `5` | 1 = fastest; 5 = more accurate. |
 | `no_speech_threshold` | `0.6` | A segment is dropped when no-speech probability is above this **and**… |
 | `log_prob_threshold` | `-1.0` | …the average log-probability is below this (Whisper's hallucination filter). |
+| `probe_no_speech_max` | `0.5` | For VAD-fallback pieces only: drop a segment whose no-speech probability is above this… |
+| `probe_log_prob_min` | `-0.7` | …or whose average log-probability is below this. Lower `probe_no_speech_max` if music turns into made-up lines; raise it if narration under music goes missing. |
 | `blocklist` | see config | Lines containing any of these are dropped (known Whisper hallucinations on silence/music, e.g. 「ご視聴ありがとうございました」). |
 
 ### `[translate]`
@@ -427,6 +432,8 @@ Every `stats_interval_s` the app logs something like:
 | Local file with `--mpv`: no video/sound in mpv, or yt-dlp errors | Check the path. Otherwise the codec isn't supported (e.g. VP9/AV1/FLAC): see [Local files](#local-files) to convert it. |
 | `--mpv` can't be combined with `--fast` | mpv plays at 1x; drop one of them. |
 | Out of VRAM / CUDA errors | Close other GPU apps; use `compute_type = "int8_float16"`; use `light`/`light-sugoi` instead of an LLM preset. |
+| Lines missing when someone talks over loud music (narration, trailers) | The VAD doesn't hear it; `[vad] fallback_s` (on by default) sends that audio to Whisper anyway. Run with `-v` to see `dropped probe` lines; raise `[asr] probe_no_speech_max` if real speech is dropped. |
+| Made-up lines during music or quiet gaps | Lower `[asr] probe_no_speech_max`, raise `[vad] fallback_min_s`, or set `[vad] fallback_s = 0` to turn the fallback off. |
 | Odd lines like 「ご視聴ありがとうございました」 during music | Whisper hallucination; add the phrase to `[asr] blocklist`. |
 | Names / game titles wrong | Add them (and their misheard forms) to `glossary.toml`. |
 | Very slow everything | Laptop on battery? Plug it in. |

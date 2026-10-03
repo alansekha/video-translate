@@ -20,6 +20,11 @@ class VadConfig:
     speech_pad_ms: int = 200  # audio kept before/after speech
     min_speech_ms: int = 250  # drop utterances with less speech than this
     max_utterance_s: float = 9.0  # force a split (at the quietest point) after this
+    # Audio the VAD calls non-speech goes to Whisper in pieces of up to this length (0 = off),
+    # for voices the VAD misses under loud music. Shorter pieces are skipped, as is silence.
+    fallback_s: float = 5.0
+    fallback_min_s: float = 1.5  # shorter pieces of music often come back as a random word
+    fallback_min_db: float = -45.0  # RMS level (dBFS) below which a piece counts as silence
 
 
 @dataclass
@@ -33,6 +38,10 @@ class AsrConfig:
     no_speech_threshold: float = 0.6
     log_prob_threshold: float = -1.0
     blocklist: list[str] = field(default_factory=list)  # known hallucinations, dropped if contained
+    # Stricter filter for VAD-fallback pieces (music, noise): a segment is kept only when
+    # no_speech_prob <= probe_no_speech_max AND avg_logprob >= probe_log_prob_min.
+    probe_no_speech_max: float = 0.5
+    probe_log_prob_min: float = -0.7
 
 
 @dataclass

@@ -17,7 +17,7 @@ class FasterWhisperASR:
         self.cfg = cfg
         self.model = WhisperModel(cfg.model, device=cfg.device, compute_type=cfg.compute_type)
 
-    def transcribe(self, audio: np.ndarray) -> str:
+    def transcribe(self, audio: np.ndarray, probe: bool = False) -> str:
         segments, _ = self.model.transcribe(
             audio,
             language="ja",
@@ -31,6 +31,11 @@ class FasterWhisperASR:
         parts = []
         for seg in segments:  # lazy generator: decoding happens here
             text = seg.text.strip()
+            if probe and (seg.no_speech_prob > self.cfg.probe_no_speech_max
+                          or seg.avg_logprob < self.cfg.probe_log_prob_min):
+                log.debug("dropped probe (no_speech %.2f, logprob %.2f): %s",
+                          seg.no_speech_prob, seg.avg_logprob, text)
+                continue
             if any(phrase in text for phrase in self.cfg.blocklist):
                 log.debug("blocked hallucination: %s", text)
                 continue
