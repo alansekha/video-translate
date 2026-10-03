@@ -101,7 +101,7 @@ uv run auto-translate SOURCE [--mode auto|live|vod] [--start TIME] [--fast]
 
 | Option | Default | Description |
 |---|---|---|
-| `SOURCE` | (required) | A YouTube URL (live or VOD, `youtube.com/watch?v=…`, `youtu.be/…`, `…/live/…`), or a path to a local audio/video file. Quote URLs in PowerShell (`&` is special). |
+| `SOURCE` | (required) | A YouTube URL (live or VOD, `youtube.com/watch?v=…`, `youtu.be/…`, `…/live/…`), or a path to a local audio/video file (see [Local files](#local-files) for supported formats). Quote URLs in PowerShell (`&` is special). |
 | `--mode auto\|live\|vod` | `auto` | `auto` asks yt-dlp whether the URL is live right now (~4 s). `live` / `vod` skip that check. Local files are always `vod`. |
 | `--start TIME` | URL's `t=` or 0 | VOD only: where to start. Formats: `962`, `16:02`, `1:02:03`, `16m2s`, `1h2m3s`. If omitted, the URL's `t=` / `start=` value is used (`…&t=962s`). Ignored for live streams (they always start at the live edge). A start past the end of the video is rejected. |
 | `--fast` | off | VOD only: process faster than real time (no 1x pacing). Useful for transcribing a whole video. Can't be combined with `--mpv`. |
@@ -131,6 +131,37 @@ uv run auto-translate "https://youtu.be/VIDEO_ID" --config my.toml -v
 | Timestamps | Seconds since the app started | Position in the video (matches the YouTube player) |
 | mpv start | After `delay_s` (9 s) | After `start_wait_s` (3 s) |
 | mpv jump keys | No ("VOD only" note) | Yes (←/→ 30 s, Shift+←/→ 5 min) |
+
+### Local files
+
+Pass a path instead of a URL: `uv run auto-translate "D:\videos\stream.mp4" --start 16:02 --mpv`.
+Any path that exists is treated as a VOD (yt-dlp isn't used). If the path has a typo, it's treated as a URL
+and yt-dlp fails with an error, so check the path first.
+
+Which formats work depends on whether you use mpv:
+
+- **Without `--mpv`**, any audio or video file that ffmpeg can read works (`.mp4`, `.mkv`, `.webm`, `.mov`,
+  `.ts`, `.flv`, `.mp3`, `.m4a`, `.wav`, `.flac`, `.ogg`, `.opus`, …). Only the first audio track is used.
+- **With `--mpv`**, the video and audio are copied as-is (not re-encoded) into MPEG-TS for mpv, so the
+  **codecs** inside the file matter, not the file extension:
+
+| | Works with `--mpv` | Doesn't work with `--mpv` |
+|---|---|---|
+| Video | H.264, H.265/HEVC, MPEG-4 Part 2 | VP9, AV1 |
+| Audio | AAC, MP3, AC-3, Opus | FLAC, PCM/WAV, Vorbis, ALAC |
+
+Most `.mp4` files and OBS/ShadowPlay recordings use H.264 + AAC, so they work. YouTube downloads in
+`.webm`/`.mkv` often use VP9 or AV1 with Opus, so they don't. Check a file with
+`ffprobe -v error -show_entries stream=codec_type,codec_name -of csv=p=0 FILE`, and convert it if needed.
+The audio-only version is fast; the full version re-encodes the video, which is slow:
+
+```powershell
+ffmpeg -i in.mkv -c:v copy -c:a aac out.mp4                    # only the audio is unsupported
+ffmpeg -i in.webm -c:v libx264 -preset fast -crf 20 -c:a aac out.mp4   # VP9/AV1 video
+```
+
+Audio-only files also work with `--mpv`, as long as the audio codec is supported (mpv shows the subtitles on
+a black window). For local files, a `--start` past the end of the file isn't detected: you just get no lines.
 
 ## Translation presets
 
@@ -393,6 +424,7 @@ Every `stats_interval_s` the app logs something like:
 | Phone can't open the viewer | Same Wi-Fi? Allow `python.exe` on Private networks in Windows Firewall; check the network is set to "Private". |
 | Subtitles late in mpv | Raise the delay (`--delay 15`, or `mpv_delay_s` in the preset), lower `[vad] max_utterance_s`, or use a faster preset. |
 | mpv video stutters / drops frames (esp. with `quality`) | Keep `[mpv] hwdec = "auto-safe"` (GPU decoding). Check Task Manager → Performance → GPU → "Video Decode" is active while playing. Otherwise use 30 fps: add `[fps<=30]` to `[mpv] ytdlp_format`. |
+| Local file with `--mpv`: no video/sound in mpv, or yt-dlp errors | Check the path. Otherwise the codec isn't supported (e.g. VP9/AV1/FLAC): see [Local files](#local-files) to convert it. |
 | `--mpv` can't be combined with `--fast` | mpv plays at 1x; drop one of them. |
 | Out of VRAM / CUDA errors | Close other GPU apps; use `compute_type = "int8_float16"`; use `light`/`light-sugoi` instead of an LLM preset. |
 | Odd lines like 「ご視聴ありがとうございました」 during music | Whisper hallucination; add the phrase to `[asr] blocklist`. |
